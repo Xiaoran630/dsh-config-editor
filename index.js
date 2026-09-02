@@ -11,23 +11,33 @@ function profileName() {
   return process.env.DSH_PROFILE || "desktop";
 }
 
-/** 目标 cordis.patch.yml 的绝对路径。 */
-function patchPath() {
-  return join(homedir(), ".dsh", "profiles", profileName(), "cordis.patch.yml");
+function profileDir() {
+  return join(homedir(), ".dsh", "profiles", profileName());
 }
 
-/** 读取 patch 文档（缺失时返回一个空的默认文档）。 */
-async function readPatch() {
+function userPatchPath() {
+  return join(profileDir(), "cordis.patch.yml");
+}
+
+function packageJsonPath() {
+  return join(profileDir(), "package.json");
+}
+
+/** 某个 bundle 包内 cordis.patch.yml 的路径。 */
+function bundlePatchPath(bundle) {
+  return join(profileDir(), "node_modules", ...bundle.split("/"), "cordis.patch.yml");
+}
+
+async function readText(p) {
   try {
-    const text = await readFile(patchPath(), "utf8");
-    return { exists: true, text };
+    return await readFile(p, "utf8");
   } catch {
-    return { exists: false, text: "# 插件配置（由 dsh-config-editor 管理）\n[]\n" };
+    return null;
   }
 }
 
 /** 从 patch YAML 文本里提取所有 insert 插件行（id / name / config）。 */
-function pluginsOf(text) {
+function rowsOf(text) {
   let doc;
   try {
     doc = parse(text);
@@ -49,6 +59,80 @@ function pluginsOf(text) {
     }
   }
   return out;
+}
+
+/** 读取 package.json 里的 dsh.profile.bundles。 */
+async function readBundles() {
+  const text = await readText(packageJsonPath());
+  if (text === null) return [];
+  try {
+    const pkg = JSON.parse(text);
+    return Array.isArray(pkg?.dsh?.profile?.bundles) ? pkg.dsh.profile.bundles : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 收集所有可配置插件：bundles 里的插件（过滤基础包），合并 bundle 默认 + 用户覆盖。 */
+async function collectPlugins() {
+  const bundles = await readBundles();
+  const userText = await readText(userPatchPath());
+  const userRows = userText === null ? [] : rowsOf(userText);
+  const plugins = [];
+
+  for (const bundle of bundles) {
+    if (bundle.startsWith("@deepseek-ai/")) continue;
+    const bundleText = await readText(bundlePatchPath(bundle));
+    // 没有 bundle patch 的包（无 cordis.patch.yml 或结构不符）跳过：无法确定其挂载 id。
+    if (bundleText === null) continue;
+    const bundleRows = rowsOf(bundleText);
+    if (bundleRows.length === 0) continue;
+
+    for (const row of bundleRows) {
+      const id = row.id || bundle;
+      const userConfig = userRows.find((r) => r.id === id)?.config ?? {};
+      plugins.push({
+        bundle,
+        id,
+        name: row.name || bundle,
+        defaultConfig: row.config || {},
+        config: { ...(row.config || {}), ...userConfig },
+      });
+    }
+  }
+  return plugins;
+}
+
+/** 把某个插件的用户覆盖 config 写回用户层 cordis.patch.yml。 */
+async function saveConfig(pluginId, config) {
+  const userText = await readText(userPatchPath());
+  let doc;
+  try {
+    doc = userText === null ? [] : parse(userText);
+  } catch {
+    doc = [];
+  }
+  if (!Array.isArray(doc)) doc = [];
+
+  let updated = false;
+  for (const entry of doc) {
+    if (entry == null || typeof entry !== "object") continue;
+    if (!Array.isArray(entry.insert)) continue;
+    for (const row of entry.insert) {
+      if (row != null && typeof row === "object" && row.id === pluginId) {
+        if (config && Object.keys(config).length > 0) row.config = config;
+        else delete row.config;
+        updated = true;
+      }
+    }
+  }
+  if (!updated) {
+    doc.push({ insert: [{ id: pluginId, config }] });
+  }
+
+  const next = stringify(doc, { lineWidth: 0 });
+  await writeFile(userPatchPath(), next, "utf8");
+  return next;
 }
 
 function writeJson(res, status, body) {
@@ -82,13 +166,12 @@ function apply(ctx) {
             writeJson(res, 405, { ok: false, error: "method not allowed" });
             return;
           }
-          const { exists, text } = await readPatch();
+          const plugins = await collectPlugins();
           writeJson(res, 200, {
             ok: true,
-            exists,
             profile: profileName(),
-            path: patchPath(),
-            plugins: pluginsOf(text),
+            path: userPatchPath(),
+            plugins,
           });
           return;
         }
@@ -105,35 +188,8 @@ function apply(ctx) {
             writeJson(res, 400, { ok: false, error: "missing id" });
             return;
           }
-
-          const { text } = await readPatch();
-          let doc;
-          try {
-            doc = parse(text);
-          } catch {
-            doc = [];
-          }
-          if (!Array.isArray(doc)) doc = [];
-
-          let updated = false;
-          for (const entry of doc) {
-            if (entry == null || typeof entry !== "object") continue;
-            if (!Array.isArray(entry.insert)) continue;
-            for (const row of entry.insert) {
-              if (row != null && typeof row === "object" && row.id === pluginId) {
-                if (Object.keys(config).length > 0) row.config = config;
-                else delete row.config;
-                updated = true;
-              }
-            }
-          }
-          if (!updated) {
-            doc.push({ insert: [{ id: pluginId, config }] });
-          }
-
-          const next = stringify(doc, { lineWidth: 0 });
-          await writeFile(patchPath(), next, "utf8");
-          writeJson(res, 200, { ok: true, plugins: pluginsOf(next) });
+          await saveConfig(pluginId, config);
+          writeJson(res, 200, { ok: true, plugins: await collectPlugins() });
           return;
         }
 

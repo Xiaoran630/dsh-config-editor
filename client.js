@@ -198,7 +198,7 @@ window.__ModuleLoader__.load({
           : error
             ? React.createElement("p", { className: "cfe-error" }, "加载失败：" + error)
             : plugins.length === 0
-              ? React.createElement("p", null, "当前 cordis.patch.yml 里还没有手动挂载的插件行。安装插件后即可在此配置。")
+              ? React.createElement("p", null, "没有检测到可配置的插件（profile 的 bundles 里没有带 cordis.patch.yml 的插件）。")
               : React.createElement(React.Fragment, null,
                   React.createElement("div", { className: "cfe-row" },
                     React.createElement("label", null, "选择插件："),
