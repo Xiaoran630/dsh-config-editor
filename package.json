@@ -1,0 +1,27 @@
+{
+  "name": "dsh-config-editor",
+  "version": "0.1.0",
+  "description": "在 DSH 设置页里用表单可视化编辑 profile 的 cordis.patch.yml 插件配置",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "yaml": "^2.5.0"
+  },
+  "license": "MIT"
+}

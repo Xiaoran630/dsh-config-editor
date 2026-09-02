@@ -1,0 +1,4 @@
+# dsh-config-editor bundle patch：把「插件配置编辑器」挂载进 profile 组合。
+- insert:
+    - id: config-editor
+      name: 'dsh-config-editor'
