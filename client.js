@@ -63,6 +63,10 @@ window.__ModuleLoader__.load({
     }
 
     function stringifyValue(type, value) {
+      // 布尔字段必须保持布尔值：checkbox 的 checked 与 parseValue 都用 === true 严格判断，
+      // 若这里 String(true) 变成 "true" 字符串，加载时复选框会错误显示为未勾选，
+      // 且用户未勾选直接保存时会把 true 覆盖成 false。
+      if (type === "boolean") return value === true;
       if (type === "array") return (Array.isArray(value) ? value : []).join("\n");
       if (type === "object") return JSON.stringify(value, null, 2);
       if (value === null || value === undefined) return "";
