@@ -114,20 +114,29 @@ async function saveConfig(pluginId, config) {
   }
   if (!Array.isArray(doc)) doc = [];
 
+  // 清理历史 bug 产生的 insert 形式（丢 name 的 insert 会与 bundle patch 的 insert 重复 id）。
+  doc = doc.filter((entry) => {
+    if (entry == null || typeof entry !== "object") return true;
+    if (!Array.isArray(entry.insert)) return true;
+    entry.insert = entry.insert.filter(
+      (row) => !(row != null && typeof row === "object" && row.id === pluginId)
+    );
+    return entry.insert.length > 0;
+  });
+
+  // 用 id 定位覆盖 config（bundle patch 已 insert 了插件行，这里只需覆盖其 config）。
   let updated = false;
   for (const entry of doc) {
     if (entry == null || typeof entry !== "object") continue;
-    if (!Array.isArray(entry.insert)) continue;
-    for (const row of entry.insert) {
-      if (row != null && typeof row === "object" && row.id === pluginId) {
-        if (config && Object.keys(config).length > 0) row.config = config;
-        else delete row.config;
-        updated = true;
-      }
+    if (entry.id === pluginId && entry.insert === undefined) {
+      if (config && Object.keys(config).length > 0) entry.config = config;
+      else delete entry.config;
+      updated = true;
+      break;
     }
   }
   if (!updated) {
-    doc.push({ insert: [{ id: pluginId, config }] });
+    doc.push({ id: pluginId, config });
   }
 
   const next = stringify(doc, { lineWidth: 0 });
